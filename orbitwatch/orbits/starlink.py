@@ -21,7 +21,7 @@ in a low insertion orbit before raising to its shell, which is what people see a
 launch from Vandenberg. Train detection uses only the elements:
 
 * group objects by launch (international designator before the piece letter);
-* keep objects below ``TRAIN_MAX_ALTITUDE_KM`` (operational shells are at ~480-570 km);
+* keep objects below ``TRAIN_MAX_ALTITUDE_KM`` (operational shells are at ~460-570 km);
 * propagate the launch's low objects to one instant and link any two within
   ``TRAIN_LINK_KM`` of each other (single-linkage clustering); a connected group of at
   least ``TRAIN_MIN_OBJECTS`` is a train;
