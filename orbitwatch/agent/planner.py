@@ -10,8 +10,9 @@ clear "not supported offline" reply rather than a guess.
 from __future__ import annotations
 
 import calendar
+import math
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from orbitwatch import config
@@ -32,6 +33,22 @@ DATE_TOKEN = re.compile(
     r"(?P<day>\d{4}-\d{2}-\d{2})|(?P<month>\d{4}-\d{2})(?![\d-])"
     r"|(?P<named>(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4})",
     re.IGNORECASE,
+)
+# A satellite named in the question that is not a well-known one: "satellite ZORBLAX-9",
+# or an upper-case designation such as "NOAA-19" / "ZORBLAX-9".
+NAMED_SAT_RE = re.compile(
+    r"\b(?:satellite|sat)\s+([A-Za-z][\w-]*\d[\w-]*|[A-Z][A-Z0-9-]{2,})"
+    r"|\b([A-Z][A-Z0-9]*-\d+[A-Z]?)\b"
+)
+PRECISION_RE = re.compile(
+    r"nanosecond|microsecond|millisecond|to the (?:exact )?(?:second|milli|centi|metre|meter)"
+    r"|(?:millimet|centimet)(?:er|re)",
+    re.IGNORECASE,
+)
+PRECISION_NOTE = (
+    "Precision note: times are reported to the whole second. Predictions from a TLE are "
+    "uncertain by seconds to minutes (more as the TLE ages), so finer precision would "
+    "not be meaningful."
 )
 BBOX_RE = re.compile(r"\[\s*" + r"\s*,\s*".join([r"(-?\d+(?:\.\d+)?)"] * 4) + r"\s*\]")
 
@@ -84,7 +101,7 @@ def resolve_aoi(text: str) -> tuple[str, list[float]] | None:
 
 def resolve_satellite(text: str) -> int:
     q = text.lower()
-    m = re.search(r"(?:norad|catalog(?: number)?|catnr)\s*#?\s*(\d{1,5})", q)
+    m = re.search(r"(?:norad|catalog(?: number)?|catnr)\s*#?\s*(\d{1,6})", q)
     if m:
         return int(m.group(1))
     if "space station" in q and "chinese" not in q:
@@ -93,6 +110,18 @@ def resolve_satellite(text: str) -> int:
         if re.search(rf"\b{name}\b", q):
             return norad_id
     return config.WELL_KNOWN_SATELLITES["iss"]
+
+
+def unknown_satellite_name(text: str) -> str | None:
+    """A satellite the question names that is neither a NORAD number nor a well-known
+    name. Red-team finding: without this the planner silently answered about the ISS."""
+    if re.search(r"(?:norad|catalog|catnr)\s*#?\s*\d", text.lower()):
+        return None
+    for m in NAMED_SAT_RE.finditer(text):
+        name = m.group(1) or m.group(2)
+        if name.lower() not in config.WELL_KNOWN_SATELLITES and name.lower() != "iss":
+            return name
+    return None
 
 
 def choose_scene_pair(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict, dict]:
@@ -180,9 +209,27 @@ class OfflinePlanner:
 
     # -- handlers ----------------------------------------------------------------------
 
+    def _lookup_named(self, question: str, result: AgentResult) -> int | str:
+        """NORAD id for the satellite in the question, or a refusal message."""
+        name = unknown_satellite_name(question)
+        if name is None:
+            return resolve_satellite(question)
+        found = self._call(result, "find_satellites", query=name, group="stations")
+        if found["match_count"] == 1:
+            return found["matches"][0]["norad_id"]
+        if found["match_count"] == 0:
+            return (
+                f"No satellite named {name!r} was found in the CelesTrak '{found['group']}' "
+                f"group ({found['source']}). I will not guess or substitute another "
+                "satellite; give its NORAD catalog number if you know it."
+            )
+        names = ", ".join(m["name"] for m in found["matches"])
+        return f"{name!r} matches several satellites ({names}); which one do you mean?"
+
     def _passes(self, question: str, result: AgentResult) -> str:
         q = question.lower()
         site = "vandenberg" if re.search(r"vandenberg|vsfb", q) else "lompoc"
+        notes = []
         days = 3.0
         if "tonight" in q:
             days = 1.0
@@ -193,19 +240,44 @@ class OfflinePlanner:
         m = re.search(r"next (\d+) days?", q)
         if m:
             days = float(min(int(m.group(1)), 10))
+            if int(m.group(1)) > 10:
+                notes.append(
+                    f"You asked for {m.group(1)} days; predictions are limited to 10 days "
+                    "because SGP4 error grows with time from the TLE epoch, so this covers "
+                    "the next 10 days only."
+                )
+        # Explicit dates: refuse past or far-future ones instead of answering another window.
+        now = self.toolbox.ctx.clock()
+        for d in re.findall(r"\b\d{4}-\d{2}-\d{2}\b", question):
+            day = date.fromisoformat(d)
+            if day < now.date():
+                return f"{d} is in the past; orbitwatch predicts upcoming passes only."
+            if day > (now + timedelta(days=10)).date():
+                return (
+                    f"I can't predict passes for {d}: that is beyond the ten-day limit. TLEs "
+                    "describe the orbit at one instant and SGP4 errors grow with time, and the "
+                    "ISS also manoeuvres, so a prediction that far ahead would be invented."
+                )
+            end = datetime.combine(day + timedelta(days=1), datetime.min.time(), now.tzinfo)
+            days = max(days, min(10.0, math.ceil((end - now).total_seconds() / 3600) / 24))
+        if PRECISION_RE.search(question):
+            notes.append(PRECISION_NOTE)
         m = re.search(r"above (\d+(?:\.\d+)?)\s*(?:°|deg)", q)
         min_el = float(m.group(1)) if m else 10.0
         visible_only = bool(re.search(r"\b(visible|see|spot|naked)\b", q))
+        norad_id = self._lookup_named(question, result)
+        if isinstance(norad_id, str):
+            return norad_id
         out = self._call(
             result,
             "predict_passes",
-            norad_id=resolve_satellite(question),
+            norad_id=norad_id,
             site=site,
             days=days,
             min_elevation_deg=min_el,
             visible_only=visible_only,
         )
-        lines = [
+        lines = notes + [
             f"{out['satellite']} (NORAD {out['norad_id']}) over {out['site']['name']} "
             f"({out['site']['latitude']}, {out['site']['longitude']}), "
             f"{out['window_start_utc']} to {out['window_end_utc']}, "
@@ -310,7 +382,10 @@ class OfflinePlanner:
         return "\n".join(lines)
 
     def _tle(self, question: str, result: AgentResult) -> str:
-        out = self._call(result, "get_tle", norad_id=resolve_satellite(question))
+        norad_id = self._lookup_named(question, result)
+        if isinstance(norad_id, str):
+            return norad_id
+        out = self._call(result, "get_tle", norad_id=norad_id)
         return "\n".join(
             [
                 f"{out['name']} (NORAD {out['norad_id']}), source {out['source']}, "
