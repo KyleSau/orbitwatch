@@ -24,6 +24,12 @@ class AgentResult:
     stop_reason: str | None = None
     model: str | None = None
     notes: list[str] = field(default_factory=list)
+    # Observability: filled by the agents and orbitwatch.agent.observe.
+    llm_calls: int = 0
+    usage: dict[str, int] = field(default_factory=dict)  # summed over LLM calls
+    cost_usd: float | None = 0.0  # None when a model's price is unknown
+    trace_id: str | None = None
+    grounding_ok: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

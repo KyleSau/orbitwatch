@@ -28,3 +28,12 @@ jobs:
         run: pytest -q
       - name: Evals (offline scripted planner + fixtures)
         run: python -m evals.run_evals
+      - name: Trace summary of the eval run
+        if: always()
+        run: orbitwatch trace summary --file evals/results/traces.jsonl --html evals/results/trace_report.html
+      - name: Upload eval results and trace report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evals-${{ matrix.python-version }}
+          path: evals/results/

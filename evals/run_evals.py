@@ -24,6 +24,7 @@ import yaml
 from orbitwatch.agent.grounding import check_grounding
 from orbitwatch.agent.types import AgentResult
 from orbitwatch.context import DataContext
+from orbitwatch.observability.tracing import Tracer
 from orbitwatch.tools import Toolbox, call_tool, input_model
 
 HERE = Path(__file__).parent
@@ -142,15 +143,20 @@ def main(argv: list[str] | None = None) -> int:
     golden = yaml.safe_load((HERE / "golden.yaml").read_text(encoding="utf-8"))
     ctx = DataContext.live() if args.data == "live" else DataContext.fixtures()
     toolbox = Toolbox(ctx)
+    results_dir = HERE / "results"
+    results_dir.mkdir(exist_ok=True)
+    trace_path = results_dir / "traces.jsonl"
+    trace_path.unlink(missing_ok=True)  # one file per eval run
+    tracer = Tracer(trace_path)
     if args.live:
         from orbitwatch.agent.claude_agent import ClaudeAgent
 
-        agent = ClaudeAgent(toolbox, model=args.model)
+        agent = ClaudeAgent(toolbox, model=args.model, tracer=tracer)
         mode = f"claude ({agent.model})"
     else:
         from orbitwatch.agent.planner import OfflinePlanner
 
-        agent = OfflinePlanner(toolbox)
+        agent = OfflinePlanner(toolbox, tracer=tracer)
         mode = "offline scripted planner"
     print(f"orbitwatch evals | agent: {mode} | data: {ctx.mode}\n")
 
@@ -191,8 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     passed = sum(r["passed"] for r in rows)
     print(f"\n{passed}/{len(rows)} passed")
 
-    results_dir = HERE / "results"
-    results_dir.mkdir(exist_ok=True)
+    print(f"traces: {trace_path} (orbitwatch trace summary --file {trace_path.as_posix()})")
     (results_dir / "latest.json").write_text(
         json.dumps({"mode": mode, "data": ctx.mode, "rows": rows}, indent=1, default=str),
         encoding="utf-8",

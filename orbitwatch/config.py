@@ -102,6 +102,12 @@ def output_dir() -> Path:
     return path
 
 
+def trace_file() -> Path:
+    """JSONL file that ``orbitwatch ask`` appends run traces to (ORBITWATCH_TRACE_FILE)."""
+    env = os.environ.get("ORBITWATCH_TRACE_FILE")
+    return Path(env) if env else cache_dir() / "traces" / "runs.jsonl"
+
+
 def load_sites() -> dict[str, GroundSite]:
     """Built-in sites plus any defined in the TOML file named by ORBITWATCH_SITES_FILE."""
     sites = dict(GROUND_SITES)

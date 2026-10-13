@@ -15,7 +15,9 @@ from datetime import date, timedelta
 from typing import Any
 
 from orbitwatch import config
+from orbitwatch.agent.observe import traced_run
 from orbitwatch.agent.types import AgentResult, ToolCall
+from orbitwatch.observability.tracing import NULL_TRACER, Tracer
 from orbitwatch.tools import Toolbox, ToolError, call_tool
 
 OFFLINE_LABEL = "[OFFLINE MODE: scripted keyword planner, no LLM]"
@@ -109,8 +111,9 @@ def choose_scene_pair(before: dict[str, Any], after: dict[str, Any]) -> tuple[di
 
 
 class OfflinePlanner:
-    def __init__(self, toolbox: Toolbox) -> None:
+    def __init__(self, toolbox: Toolbox, tracer: Tracer = NULL_TRACER) -> None:
         self.toolbox = toolbox
+        self.tracer = tracer
 
     def ask(self, question: str) -> AgentResult:
         result = AgentResult(
@@ -119,8 +122,16 @@ class OfflinePlanner:
             mode="offline-scripted",
             data_mode=self.toolbox.ctx.mode,
             notes=list(self.toolbox.ctx.notes),
+            stop_reason="scripted",
+            cost_usd=0.0,  # no LLM: traced with zero tokens and zero cost
         )
-        intent = self.classify(question)
+        with traced_run(self.tracer, result) as span:
+            intent = self.classify(question)
+            span.set(orbitwatch__planner__intent=intent)
+            self._answer(question, intent, result)
+        return result
+
+    def _answer(self, question: str, intent: str | None, result: AgentResult) -> None:
         handler = {
             "trains": self._trains,
             "starlink": self._starlink,
@@ -135,13 +146,12 @@ class OfflinePlanner:
                 f"planner supports: {SUPPORTED}. Use the Claude agent "
                 "(set ANTHROPIC_API_KEY) for open-ended questions."
             )
-            return result
+            return
         try:
             body = handler(question, result)
         except (ToolError, ValueError) as exc:
             body = f"Could not answer: {exc}"
         result.answer = f"{OFFLINE_LABEL}\n{body}"
-        return result
 
     @staticmethod
     def classify(question: str) -> str | None:
@@ -162,7 +172,7 @@ class OfflinePlanner:
         call = ToolCall(name=name, arguments=arguments)
         result.tool_calls.append(call)
         try:
-            call.result = call_tool(self.toolbox, name, arguments)
+            call.result = call_tool(self.toolbox, name, arguments, self.tracer)
         except ToolError as exc:
             call.error = str(exc)
             raise

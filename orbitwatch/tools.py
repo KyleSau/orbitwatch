@@ -33,6 +33,7 @@ from orbitwatch import config
 from orbitwatch.context import DataContext
 from orbitwatch.eo.analysis import compare_scenes
 from orbitwatch.eo.stac import validate_bbox
+from orbitwatch.observability.tracing import NULL_TRACER, Tracer
 from orbitwatch.orbits import starlink
 from orbitwatch.orbits.passes import predict_passes as _predict_passes
 
@@ -581,8 +582,25 @@ def anthropic_tool_definitions() -> list[dict[str, Any]]:
     return tools
 
 
-def call_tool(toolbox: Toolbox, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """Validate ``arguments`` against the tool's schema and run it. Raises ToolError."""
+def call_tool(
+    toolbox: Toolbox, name: str, arguments: dict[str, Any], tracer: Tracer = NULL_TRACER
+) -> dict[str, Any]:
+    """Validate ``arguments`` against the tool's schema and run it, inside a ``tool.call``
+    span. Raises ToolError."""
+    args_json = json.dumps(arguments, default=str)
+    with tracer.span(
+        "tool.call", gen_ai__tool__name=name, orbitwatch__tool__arguments=args_json
+    ) as span:
+        try:
+            result = _call_tool(toolbox, name, arguments)
+        except ToolError as exc:
+            span.error(str(exc), (exc.__cause__ and type(exc.__cause__).__name__) or "ToolError")
+            raise
+        span.set(orbitwatch__tool__result_bytes=len(to_json(result)))
+        return result
+
+
+def _call_tool(toolbox: Toolbox, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name not in TOOL_NAMES:
         raise ToolError(f"Unknown tool {name!r}. Available: {list(TOOL_NAMES)}")
     try:

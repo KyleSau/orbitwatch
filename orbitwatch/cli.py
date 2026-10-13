@@ -269,11 +269,14 @@ def cmd_change(args) -> int:
 
 
 def cmd_ask(args) -> int:
+    from orbitwatch.observability.tracing import NULL_TRACER, Tracer
+
     toolbox = _toolbox(args)
+    tracer = NULL_TRACER if args.no_trace else Tracer(args.trace or config.trace_file())
     if args.offline:
         from orbitwatch.agent.planner import OfflinePlanner
 
-        result = OfflinePlanner(toolbox).ask(args.question)
+        result = OfflinePlanner(toolbox, tracer=tracer).ask(args.question)
     else:
         if not os.environ.get("ANTHROPIC_API_KEY"):
             print(
@@ -285,7 +288,8 @@ def cmd_ask(args) -> int:
         from orbitwatch.agent.claude_agent import AgentError, ClaudeAgent
 
         try:
-            result = ClaudeAgent(toolbox, model=args.model, effort=args.effort).ask(args.question)
+            agent = ClaudeAgent(toolbox, model=args.model, effort=args.effort, tracer=tracer)
+            result = agent.ask(args.question)
         except AgentError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
@@ -302,6 +306,38 @@ def cmd_ask(args) -> int:
             print(f"[tool] {call.name}({json.dumps(call.arguments)}) -> {status}")
     print()
     print(result.answer)
+    if args.verbose and tracer.path:
+        cost = "unknown" if result.cost_usd is None else f"${result.cost_usd:.4f}"
+        print(
+            f"\n[trace {result.trace_id} -> {tracer.path} | llm calls {result.llm_calls}, "
+            f"est. cost {cost}, grounded {result.grounding_ok}]"
+        )
+    return 0
+
+
+def cmd_trace(args) -> int:
+    from orbitwatch.observability import report
+    from orbitwatch.observability.tracing import load_spans
+
+    path = Path(args.file) if args.file else config.trace_file()
+    if not path.exists():
+        print(f"No trace file at {path}. Run `orbitwatch ask ...` first.", file=sys.stderr)
+        return 1
+    spans = load_spans(path)
+    summary = report.summarize(spans)
+    if args.json:
+        _print_json(summary)
+    else:
+        print(f"trace file: {path} ({len(spans)} spans)")
+        print(report.format_text(summary))
+    if args.png or args.html:
+        png = report.render_png(summary, spans)
+        if args.png:
+            Path(args.png).write_bytes(png)
+            print(f"wrote {args.png}")
+        if args.html:
+            Path(args.html).write_text(report.render_html(summary, png, str(path)), "utf-8")
+            print(f"wrote {args.html}")
     return 0
 
 
@@ -393,6 +429,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--effort", default=None, choices=["low", "medium", "high", "xhigh", "max"])
     sp.add_argument("--json", action="store_true")
     sp.add_argument("-v", "--verbose", action="store_true", help="show tool calls")
+    sp.add_argument("--trace", help="append the run's spans to this JSONL file")
+    sp.add_argument("--no-trace", action="store_true", help="do not record a trace")
+
+    sp = sub.add_parser("trace", help="summarise recorded agent traces")
+    sp.add_argument("action", choices=["summary"])
+    sp.add_argument("--file", help="JSONL trace file (default: the ask trace file)")
+    sp.add_argument("--html", help="also write a static HTML report here")
+    sp.add_argument("--png", help="also write the latency chart PNG here")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_trace)
 
     add("mcp", cmd_mcp, "run the MCP server over stdio")
     return p

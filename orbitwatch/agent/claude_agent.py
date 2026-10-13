@@ -30,7 +30,10 @@ from typing import Any
 import anthropic
 
 from orbitwatch import config
+from orbitwatch.agent.observe import traced_run
 from orbitwatch.agent.types import AgentResult, ToolCall
+from orbitwatch.observability.pricing import estimate_cost_usd, usage_dict
+from orbitwatch.observability.tracing import NULL_TRACER, Tracer
 from orbitwatch.tools import Toolbox, ToolError, anthropic_tool_definitions, call_tool, to_json
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -87,8 +90,10 @@ class ClaudeAgent:
         effort: str | None = None,
         max_turns: int = 8,
         use_fallbacks: bool = True,
+        tracer: Tracer = NULL_TRACER,
     ) -> None:
         self.toolbox = toolbox
+        self.tracer = tracer
         self.client = client or anthropic.Anthropic()
         self.model = model or os.environ.get("ORBITWATCH_MODEL", config.DEFAULT_MODEL)
         self.effort = effort or os.environ.get("ORBITWATCH_EFFORT", config.DEFAULT_EFFORT)
@@ -103,6 +108,38 @@ class ClaudeAgent:
             f"{SYSTEM_PROMPT}\n\nCurrent time (UTC): {ctx.clock():%Y-%m-%d %H:%M}. "
             f"Data source: {source}."
         )
+
+    def _traced_create(self, system: str, messages: list[dict[str, Any]], result: AgentResult):
+        """One Messages API call inside an ``llm.call`` span; adds usage and cost to the run."""
+        with self.tracer.span(
+            "llm.call",
+            gen_ai__system="anthropic",
+            gen_ai__operation__name="chat",
+            gen_ai__request__model=self.model,
+            orbitwatch__turn=result.llm_calls + 1,
+        ) as span:
+            try:
+                response = self._create(system, messages)
+            except AgentError as exc:
+                span.error(str(exc), type(exc.__cause__).__name__ if exc.__cause__ else None)
+                raise
+            usage = usage_dict(getattr(response, "usage", None))
+            served_by = getattr(response, "model", self.model)
+            cost = estimate_cost_usd(served_by, usage)
+            span.set(
+                gen_ai__response__model=served_by,
+                gen_ai__response__finish_reasons=[response.stop_reason],
+                orbitwatch__cost_usd=cost,
+                **{f"gen_ai__usage__{k}": v for k, v in usage.items()},
+            )
+        result.llm_calls += 1
+        for k, v in usage.items():
+            result.usage[k] = result.usage.get(k, 0) + v
+        if cost is None or result.cost_usd is None:
+            result.cost_usd = None  # one unpriced call makes the total unknown
+        else:
+            result.cost_usd = round(result.cost_usd + cost, 6)
+        return response
 
     def _create(self, system: str, messages: list[dict[str, Any]]):
         kwargs: dict[str, Any] = {
@@ -143,6 +180,11 @@ class ClaudeAgent:
             data_mode=self.toolbox.ctx.mode,
             model=self.model,
         )
+        with traced_run(self.tracer, result):
+            self._loop(question, result)
+        return result
+
+    def _loop(self, question: str, result: AgentResult) -> None:
         # Built once per question: the system prompt (and tools, and earlier messages) must
         # stay byte-identical across turns, or replayed thinking blocks are rejected and the
         # prompt cache misses. The clock in it must not tick between turns.
@@ -150,7 +192,7 @@ class ClaudeAgent:
         messages: list[dict[str, Any]] = [{"role": "user", "content": question}]
 
         for _ in range(self.max_turns):
-            response = self._create(system, messages)
+            response = self._traced_create(system, messages, result)
             result.model = getattr(response, "model", self.model)
             result.stop_reason = response.stop_reason
             iterations = getattr(getattr(response, "usage", None), "iterations", None) or []
@@ -162,12 +204,12 @@ class ClaudeAgent:
                 details = getattr(response, "stop_details", None)
                 category = getattr(details, "category", None) if details else None
                 result.answer = f"The model declined this request (category: {category})."
-                return result
+                return
             content = history_safe_content(response.content)
             if response.stop_reason == "max_tokens":
                 result.answer = _text_of(content) or "Stopped: the response hit max_tokens."
                 result.notes.append("Hit max_tokens; no tools from the truncated turn were run.")
-                return result
+                return
 
             messages.append({"role": "assistant", "content": content})
             if response.stop_reason == "pause_turn":
@@ -175,13 +217,13 @@ class ClaudeAgent:
             tool_uses = [b for b in content if b.type == "tool_use"]
             if response.stop_reason != "tool_use" or not tool_uses:
                 result.answer = _text_of(content)
-                return result
+                return
 
             tool_results = []
             for block in tool_uses:
                 call = ToolCall(name=block.name, arguments=dict(block.input or {}))
                 try:
-                    call.result = call_tool(self.toolbox, block.name, call.arguments)
+                    call.result = call_tool(self.toolbox, block.name, call.arguments, self.tracer)
                     tool_results.append(
                         {
                             "type": "tool_result",
@@ -204,4 +246,3 @@ class ClaudeAgent:
 
         result.answer = "Stopped after the maximum number of turns without a final answer."
         result.stop_reason = "max_turns"
-        return result
