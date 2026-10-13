@@ -11,6 +11,7 @@
 #   grounded         every number, date and time in the answer appears in a tool result
 #   cites_tle_epoch  the answer states the TLE epoch (date and HH:MM) it used
 #   cites_scenes     the answer names the scene IDs and acquisition dates it compared
+#   cites_element_epochs  every Starlink pass quoted comes with that satellite's epoch
 
 cases:
   - id: iss_visible_lompoc
@@ -62,9 +63,24 @@ cases:
       search_sentinel2_scenes: {max_cloud_cover: 5, start_date: "2026-09-01", end_date: "2026-09-30"}
     checks: [grounded]
 
+  - id: starlink_visible_tonight_lompoc
+    question: "Which Starlink satellites can I see tonight from Lompoc?"
+    expect_tools: [starlink_visible_passes]
+    expect_args:
+      starlink_visible_passes: {site: lompoc}
+    checks: [grounded, cites_element_epochs]
+
+  - id: starlink_train_vandenberg
+    question: "Is there a Starlink train visible over Vandenberg in the next few days?"
+    expect_tools: [find_starlink_trains]
+    expect_args:
+      find_starlink_trains: {site: vandenberg}
+    checks: [grounded]
+
   - id: out_of_scope_weather
     question: "What will the weather be in Lompoc tomorrow?"
-    forbid_tools: [predict_passes, get_tle, search_sentinel2_scenes, compare_index_between_scenes]
+    forbid_tools: [predict_passes, get_tle, search_sentinel2_scenes, compare_index_between_scenes,
+                   starlink_visible_passes, find_starlink_trains]
     checks: [grounded]
 
 # Tool-level physics check, always run on fixtures: our event-based pass finder must

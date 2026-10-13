@@ -34,7 +34,7 @@ orbitwatch = "orbitwatch.cli:main"
 include = ["orbitwatch*"]
 
 [tool.setuptools.package-data]
-orbitwatch = ["fixtures/*.tle", "fixtures/*.json", "fixtures/*.bsp"]
+orbitwatch = ["fixtures/*.tle", "fixtures/*.json", "fixtures/*.json.gz", "fixtures/*.bsp"]
 
 [tool.ruff]
 line-length = 100

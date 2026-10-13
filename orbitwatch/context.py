@@ -23,6 +23,8 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 FIXTURE_TLE_FILE = FIXTURES_DIR / "stations_2026-10-13.tle"
 FIXTURE_EPHEMERIS = FIXTURES_DIR / "de421_2026-10_2026-11.bsp"
 FIXTURE_STAC_FILE = FIXTURES_DIR / "stac_lompoc_valley_2026.json"
+# The whole CelesTrak 'starlink' group as OMM JSON, recorded 2026-10-13 20:56:36 UTC.
+FIXTURE_STARLINK_FILE = FIXTURES_DIR / "starlink_2026-10-13.json.gz"
 # Fixed "now" for fixture mode, shortly after the recorded TLEs were downloaded.
 FIXTURE_CLOCK = datetime(2026, 10, 13, 20, 0, 0, tzinfo=UTC)
 
@@ -70,7 +72,11 @@ class DataContext:
 
         return cls(
             mode="fixtures",
-            tle_source=FileTleSource(FIXTURE_TLE_FILE, retrieved_at=FIXTURE_CLOCK),
+            tle_source=FileTleSource(
+                FIXTURE_TLE_FILE,
+                retrieved_at=FIXTURE_CLOCK,
+                omm_files={"starlink": FIXTURE_STARLINK_FILE},
+            ),
             catalog=FixtureCatalog(
                 FIXTURE_STAC_FILE, rewrite_item=make_fixture_rewriter(work / "synthetic")
             ),
@@ -78,7 +84,8 @@ class DataContext:
             clock=lambda: FIXTURE_CLOCK,
             output_dir=work / "outputs",
             notes=[
-                "FIXTURE DATA: TLEs recorded from CelesTrak on 2026-10-13, STAC metadata "
+                "FIXTURE DATA: TLEs and Starlink OMM recorded from CelesTrak on 2026-10-13, "
+                "STAC metadata "
                 "recorded from Earth Search, pixel values synthetic. Clock fixed at "
                 f"{FIXTURE_CLOCK:%Y-%m-%d %H:%M} UTC."
             ],

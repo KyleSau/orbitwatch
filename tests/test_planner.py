@@ -24,6 +24,8 @@ from orbitwatch.agent.planner import (
         ),
         ("Which Sentinel-2 scenes cover Lompoc in September 2026?", "scenes"),
         ("Show me the TLE for the ISS", "tle"),
+        ("Which Starlink satellites can I see tonight?", "starlink"),
+        ("When is the next Starlink train over Vandenberg?", "trains"),
         ("What's the weather in Lompoc tomorrow?", None),
     ],
 )

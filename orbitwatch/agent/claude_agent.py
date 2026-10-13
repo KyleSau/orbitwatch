@@ -44,7 +44,7 @@ Rules:
 scene IDs, acquisition dates, cloud cover and index statistics. Never estimate or invent a \
 number. If no tool returned it, say you do not have it.
 - For pass predictions, state the TLE epoch used, and give times exactly as the tool \
-returns them (UTC and local).
+returns them (UTC and local). For Starlink, give each satellite's elements_epoch_utc.
 - For Earth-observation results, cite the scene IDs, acquisition dates and cloud cover of the \
 scenes you used, and the fraction of pixels that were valid in both scenes.
 - Describe what the numbers show. Do not attribute a change to a cause (fire, drought, \

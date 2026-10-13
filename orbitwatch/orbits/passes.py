@@ -22,6 +22,7 @@ import numpy as np
 from skyfield.api import EarthSatellite, Timescale, load, wgs84
 
 from orbitwatch.config import GroundSite
+from orbitwatch.orbits.omm import Omm
 from orbitwatch.orbits.tle import Tle
 
 SUN_DARK_ALTITUDE_DEG = -6.0  # civil twilight
@@ -36,6 +37,14 @@ def timescale() -> Timescale:
     if _TIMESCALE is None:
         _TIMESCALE = load.timescale(builtin=True)
     return _TIMESCALE
+
+
+def make_satellite(elements: Tle | Omm, ts: Timescale | None = None) -> EarthSatellite:
+    """A Skyfield satellite from either element-set format (both are SGP4 mean elements)."""
+    ts = ts or timescale()
+    if isinstance(elements, Omm):
+        return EarthSatellite.from_omm(ts, elements.fields)
+    return EarthSatellite(elements.line1, elements.line2, elements.name, ts)
 
 
 @dataclass
@@ -87,16 +96,17 @@ class Pass:
 
 
 def predict_passes(
-    tle: Tle,
+    tle: Tle | Omm,
     site: GroundSite,
     start: datetime,
     end: datetime,
     min_elevation_deg: float = 10.0,
     ephemeris=None,
 ) -> list[Pass]:
-    """Return complete passes of ``tle`` over ``site`` between ``start`` and ``end`` (UTC)."""
+    """Return complete passes of ``tle`` (a TLE or OMM element set) over ``site`` between
+    ``start`` and ``end`` (UTC)."""
     ts = timescale()
-    sat = EarthSatellite(tle.line1, tle.line2, tle.name, ts)
+    sat = make_satellite(tle, ts)
     observer = wgs84.latlon(site.latitude, site.longitude, elevation_m=site.elevation_m)
     t0, t1 = ts.from_datetime(start), ts.from_datetime(end)
     times, events = sat.find_events(observer, t0, t1, altitude_degrees=min_elevation_deg)

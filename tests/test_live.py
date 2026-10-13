@@ -34,6 +34,11 @@ def test_live_passes(live_toolbox):
     assert out["passes_above_threshold"] > 0
 
 
+def test_live_starlink_group(live_toolbox):
+    out = call_tool(live_toolbox, "starlink_visible_passes", {"site": "lompoc", "hours": 24})
+    assert out["objects_in_catalog"] > 5000 and out["source"].startswith("CelesTrak")
+
+
 def test_earth_search_finds_known_scene(live_toolbox):
     out = call_tool(
         live_toolbox,

@@ -2,7 +2,7 @@ from typing import get_args
 
 import pytest
 
-from orbitwatch.orbits.celestrak import SUPPORTED_GROUPS
+from orbitwatch.orbits.celestrak import SUPPORTED_GROUPS, SUPPORTED_OMM_GROUPS
 from orbitwatch.tools import (
     TOOL_NAMES,
     Group,
@@ -50,7 +50,7 @@ def test_tool_definitions_are_strict_and_closed():
 
 
 def test_group_literal_matches_celestrak_groups():
-    assert set(get_args(Group)) == set(SUPPORTED_GROUPS)
+    assert set(get_args(Group)) == set(SUPPORTED_GROUPS) | set(SUPPORTED_OMM_GROUPS)
 
 
 def test_required_parameters():
@@ -77,6 +77,16 @@ def test_required_parameters():
             "search_sentinel2_scenes",
             {"bbox": [1, 2], "start_date": "2026-04-01", "end_date": "2026-04-30"},
             "bbox",
+        ),
+        (
+            "search_sentinel2_scenes",
+            {"bbox": AOI, "start_date": "2010-04-01", "end_date": "2010-09-30"},
+            "launched on 2015-06-23",
+        ),
+        (
+            "search_sentinel2_scenes",
+            {"bbox": AOI, "start_date": "2031-01-01", "end_date": "2031-02-01"},
+            "in the future",
         ),
     ],
 )

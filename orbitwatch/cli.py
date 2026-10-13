@@ -120,6 +120,83 @@ def cmd_passes(args) -> int:
     return 0
 
 
+def cmd_starlink(args) -> int:
+    toolbox = _toolbox(args)
+    where = {"site": args.site, "latitude": args.lat, "longitude": args.lon}
+    if args.min_el is None:
+        args.min_el = 30.0 if args.what == "passes" else 10.0
+    if args.what == "passes":
+        out = call_tool(
+            toolbox,
+            "starlink_visible_passes",
+            {
+                **where,
+                "hours": args.hours,
+                "min_elevation_deg": args.min_el,
+                "max_results": args.top,
+            },
+        )
+    else:
+        out = call_tool(
+            toolbox,
+            "find_starlink_trains",
+            {**where, "days": args.days, "min_elevation_deg": args.min_el},
+        )
+    if args.json:
+        _print_json(out)
+        return 0
+    s = out["site"]
+    print(
+        f"Starlink ({out['source']}, retrieved {out['retrieved_at_utc']}) over {s['name']} "
+        f"({s['latitude']}, {s['longitude']})"
+    )
+    print(f"Window {out['window_start_utc']} -> {out['window_end_utc']}")
+    if args.what == "passes":
+        print(
+            f"{out['objects_screened']} of {out['objects_in_catalog']} objects screened; "
+            f"{out['candidates_screened']} candidates, {out['candidates_checked_exactly']} checked "
+            f"exactly; {out['visible_passes_confirmed']} visible passes above "
+            f"{out['min_elevation_deg']} deg; closest {out['returned']}:\n"
+        )
+        print(
+            f"{'name':<22}{'launch':>10}{'alt km':>8}{'range':>7}  {'rise (local)':<24}"
+            f"{'max el':>7}  visible"
+        )
+        for p in out["passes"]:
+            vis = f"{p['visible_start_local'][11:19]}-{p['visible_end_local'][11:19]}"
+            print(
+                f"{p['name']:<22}{p['launch']:>10}{p['mean_altitude_km']:>8}"
+                f"{p['range_at_culmination_km']:>7}  {p['rise_local']:<24}"
+                f"{p['max_elevation_deg']:>7}  {vis}"
+            )
+        print(f"\nnote: {out['brightness_note']}")
+    else:
+        print(f"{out['train_count']} train(s) found (criteria {out['criteria']})")
+        for t in out["trains"]:
+            print(
+                f"\nlaunch {t['launch']}: {t['objects_in_train']} objects, "
+                f"lead {t['lead']['name']}, tail {t['tail']['name']}, "
+                f"span {t['along_track_span_km']} km "
+                f"(~{t['passage_estimate_s']} s to pass), {t['visible_pass_count']} visible passes"
+            )
+            for p in t["passes"]:
+                vis = "VISIBLE" if p["train_visible"] else "not visible"
+                print(f"  {p['rise_local']}  max el {p['max_elevation_deg']}  {vis}")
+        print(
+            f"\n{out['low_orbit_launch_count']} launches have objects below the "
+            "train altitude; most recent:"
+        )
+        for x in out["most_recent_low_orbit_launches"]:
+            print(
+                f"  {x['launch']}: {x['objects_in_low_orbit']} objects at "
+                f"~{x['median_altitude_km']} km, largest cluster {x['largest_cluster']}, "
+                f"median neighbour {x['median_neighbour_distance_km']} km"
+            )
+    for w in out["warnings"]:
+        print(f"warning: {w}")
+    return 0
+
+
 def cmd_scenes(args) -> int:
     start, end = _window(args.window)
     out = call_tool(
@@ -269,6 +346,17 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--days", type=float, default=3.0)
     sp.add_argument("--min-el", type=float, default=10.0)
     sp.add_argument("--visible-only", action="store_true")
+    sp.add_argument("--json", action="store_true")
+
+    sp = add("starlink", cmd_starlink, "visible Starlink passes, or launch trains")
+    sp.add_argument("what", choices=["passes", "trains"])
+    sp.add_argument("--site", default=config.DEFAULT_SITE)
+    sp.add_argument("--lat", type=float)
+    sp.add_argument("--lon", type=float)
+    sp.add_argument("--hours", type=float, default=24.0, help="passes: window length")
+    sp.add_argument("--days", type=float, default=3.0, help="trains: pass-prediction window")
+    sp.add_argument("--min-el", type=float, default=None, help="default 30 (passes) / 10 (trains)")
+    sp.add_argument("--top", type=int, default=10, help="passes: how many to show")
     sp.add_argument("--json", action="store_true")
 
     def add_aoi(sp: argparse.ArgumentParser) -> None:

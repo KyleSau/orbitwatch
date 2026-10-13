@@ -21,7 +21,8 @@ from orbitwatch.tools import Toolbox, ToolError, call_tool
 OFFLINE_LABEL = "[OFFLINE MODE: scripted keyword planner, no LLM]"
 SUPPORTED = (
     "satellite passes (e.g. 'When are the next visible ISS passes over Lompoc?'), "
-    "TLE lookup, Sentinel-2 scene search, and NDVI/NBR change between two dates"
+    "visible Starlink passes and Starlink launch trains, TLE lookup, Sentinel-2 scene "
+    "search, and NDVI/NBR change between two dates"
 )
 
 MONTHS = {name.lower(): i for i, name in enumerate(calendar.month_abbr) if name}
@@ -121,6 +122,8 @@ class OfflinePlanner:
         )
         intent = self.classify(question)
         handler = {
+            "trains": self._trains,
+            "starlink": self._starlink,
             "change": self._change,
             "scenes": self._scenes,
             "tle": self._tle,
@@ -143,6 +146,8 @@ class OfflinePlanner:
     @staticmethod
     def classify(question: str) -> str | None:
         q = question.lower()
+        if re.search(r"\bstarlink\b", q):
+            return "trains" if re.search(r"\btrains?\b", q) else "starlink"
         if re.search(r"\b(ndvi|nbr|vegetation|greenness|burn(ed)?|burn severity)\b", q):
             return "change"
         if re.search(r"\b(scenes?|imagery|images?|sentinel)\b", q):
@@ -214,6 +219,84 @@ class OfflinePlanner:
             lines.append(line + ".")
         lines += [f"Warning: {w}" for w in out["warnings"]]
         lines.append(f"Visibility rule: {out['visibility_rule']}. Orbit data: CelesTrak.")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _site(question: str) -> str:
+        return "vandenberg" if re.search(r"vandenberg|vsfb", question.lower()) else "lompoc"
+
+    def _starlink(self, question: str, result: AgentResult) -> str:
+        q = question.lower()
+        hours = 12.0 if "tonight" in q else 24.0
+        m = re.search(r"above (\d+(?:\.\d+)?)\s*(?:°|deg)", q)
+        out = self._call(
+            result,
+            "starlink_visible_passes",
+            site=self._site(question),
+            hours=hours,
+            min_elevation_deg=float(m.group(1)) if m else 30.0,
+            max_results=5,
+        )
+        lines = [
+            f"Visible Starlink passes over {out['site']['name']}, {out['window_start_utc']} to "
+            f"{out['window_end_utc']}, above {out['min_elevation_deg']} deg (CelesTrak Starlink "
+            f"group, {out['source']}, retrieved {out['retrieved_at_utc']}).",
+            f"Screened {out['objects_screened']} of {out['objects_in_catalog']} objects; "
+            f"{out['visible_passes_confirmed']} visible passes confirmed. The "
+            f"{out['returned']} closest:",
+        ]
+        for p in out["passes"]:
+            lines.append(
+                f"- {p['name']} (launch {p['launch']}, ~{p['mean_altitude_km']} km): rise "
+                f"{p['rise_utc']} ({p['rise_local']}), max elevation {p['max_elevation_deg']} "
+                f"deg, closest range {p['range_at_culmination_km']} km, visible "
+                f"{p['visible_start_utc']} to {p['visible_end_utc']}; elements epoch "
+                f"{p['elements_epoch_utc']}."
+            )
+        lines += [f"Warning: {w}" for w in out["warnings"]]
+        lines.append(f"{out['brightness_note']} Visibility rule: {out['visibility_rule']}.")
+        return "\n".join(lines)
+
+    def _trains(self, question: str, result: AgentResult) -> str:
+        out = self._call(result, "find_starlink_trains", site=self._site(question), days=3.0)
+        crit = out["criteria"]
+        lines = [
+            f"Starlink trains (CelesTrak Starlink group, {out['source']}, retrieved "
+            f"{out['retrieved_at_utc']}); passes over {out['site']['name']} from "
+            f"{out['window_start_utc']} to {out['window_end_utc']}."
+        ]
+        if not out["trains"]:
+            lines.append(
+                "No Starlink train was found in the current element sets: no launch has at "
+                f"least {crit['min_objects']} objects below {crit['max_altitude_km']} km "
+                f"flying within {crit['link_distance_km']} km of each other, so there is no "
+                "train pass to report."
+            )
+        for t in out["trains"]:
+            lines.append(
+                f"Train from launch {t['launch']}: {t['objects_in_train']} satellites, lead "
+                f"{t['lead']['name']} (elements epoch {t['lead']['elements_epoch_utc']}), tail "
+                f"{t['tail']['name']}, spread over {t['along_track_span_km']} km "
+                f"(about {t['passage_estimate_s']} s to pass), median altitude "
+                f"{t['median_altitude_km']} km; {t['visible_pass_count']} visible passes."
+            )
+            for p in t["passes"]:
+                vis = "visible" if p["train_visible"] else "not visible (sky or train not lit)"
+                lines.append(
+                    f"- Lead rises {p['rise_utc']} ({p['rise_local']}), max elevation "
+                    f"{p['max_elevation_deg']} deg; tail sets {p['tail_set_utc']}; {vis}."
+                )
+        if out["most_recent_low_orbit_launches"]:
+            lines.append("Most recent launches with objects still below the train altitude:")
+        for x in out["most_recent_low_orbit_launches"]:
+            spread = x["largest_cluster"] < crit["min_objects"]
+            lines.append(
+                f"- {x['launch']}: {x['objects_in_low_orbit']} objects at about "
+                f"{x['median_altitude_km']} km, largest cluster {x['largest_cluster']}, median "
+                f"spacing {x['median_neighbour_distance_km']} km"
+                + (" (spread out, not a train)." if spread else ".")
+            )
+        lines += [f"Warning: {w}" for w in out["warnings"]]
         return "\n".join(lines)
 
     def _tle(self, question: str, result: AgentResult) -> str:

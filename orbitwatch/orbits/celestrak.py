@@ -7,21 +7,26 @@ cycle; repeated requests can get an IP address blocked. So we:
 * never retry a 403/404 (the answer will not change by asking again),
 * fall back to a stale cached copy, clearly flagged, if a refresh fails.
 
+The same rules apply to TLE text and to OMM JSON (used for the Starlink group).
+
 Data courtesy of CelesTrak (https://celestrak.org), Dr. T.S. Kelso.
 """
 
 from __future__ import annotations
 
+import gzip
+import json
 import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import requests
 
+from orbitwatch.orbits.omm import Omm, parse_omm_json
 from orbitwatch.orbits.tle import Tle, parse_tle_text
 
 GP_URL = "https://celestrak.org/NORAD/elements/gp.php"
@@ -30,6 +35,9 @@ USER_AGENT = "orbitwatch/0.1 (+https://github.com/kylesau/orbitwatch)"
 
 # Groups exposed to tools. Names match CelesTrak's "Current Data" page.
 SUPPORTED_GROUPS = ("stations", "visual", "weather", "science", "gps-ops")
+# Groups fetched as OMM JSON instead. Starlink is ~11k objects, many with 6-digit catalog
+# numbers that the TLE format cannot hold; it is one ~5 MB download per 2-hour cycle at most.
+SUPPORTED_OMM_GROUPS = ("starlink",)
 
 
 class CelesTrakError(RuntimeError):
@@ -46,10 +54,22 @@ class TleResult:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class OmmResult:
+    records: list[Omm]
+    source: str
+    retrieved_at: datetime
+    from_cache: bool
+    stale: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+
 class TleSource(Protocol):
     def get_tle(self, norad_id: int) -> TleResult: ...
 
     def get_group(self, group: str) -> TleResult: ...
+
+    def get_omm_group(self, group: str) -> OmmResult: ...
 
 
 def _utcnow() -> datetime:
@@ -57,7 +77,7 @@ def _utcnow() -> datetime:
 
 
 class CelesTrakClient:
-    """Live TLE source backed by CelesTrak with a simple file cache."""
+    """Live element-set source backed by CelesTrak with a simple file cache."""
 
     def __init__(
         self,
@@ -79,7 +99,7 @@ class CelesTrakClient:
             raise CelesTrakError(
                 "TLE format only supports catalog numbers 1-99999; newer objects need OMM."
             )
-        result = self._get({"CATNR": str(int(norad_id))}, f"catnr-{int(norad_id)}.tle")
+        result = TleResult(*self._get({"CATNR": str(int(norad_id))}, f"catnr-{int(norad_id)}.tle"))
         if not result.tles:
             raise CelesTrakError(f"CelesTrak returned no element set for NORAD {norad_id}.")
         return result
@@ -88,31 +108,40 @@ class CelesTrakClient:
         group = group.lower()
         if group not in SUPPORTED_GROUPS:
             raise CelesTrakError(f"Unsupported group {group!r}; choose from {SUPPORTED_GROUPS}.")
-        return self._get({"GROUP": group}, f"group-{group}.tle")
+        return TleResult(*self._get({"GROUP": group}, f"group-{group}.tle"))
+
+    def get_omm_group(self, group: str) -> OmmResult:
+        """A whole group as OMM JSON records (same cache and rate policy as TLEs)."""
+        group = group.lower()
+        if group not in SUPPORTED_OMM_GROUPS:
+            raise CelesTrakError(
+                f"Unsupported OMM group {group!r}; choose from {SUPPORTED_OMM_GROUPS}."
+            )
+        return OmmResult(
+            *self._get({"GROUP": group}, f"group-{group}.json", "JSON", parse_omm_json)
+        )
 
     # -- internals ---------------------------------------------------------------
 
-    def _read_cache(self, path: Path, stale: bool, warning: str | None = None) -> TleResult:
-        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
-        return TleResult(
-            tles=parse_tle_text(path.read_text(encoding="utf-8")),
-            source="CelesTrak GP API (cached)",
-            retrieved_at=mtime,
-            from_cache=True,
-            stale=stale,
-            warnings=[warning] if warning else [],
-        )
-
-    def _get(self, params: dict[str, str], cache_name: str) -> TleResult:
+    def _get(
+        self,
+        params: dict[str, str],
+        cache_name: str,
+        fmt: str = "TLE",
+        parse: Callable[[str], list[Any]] = parse_tle_text,
+    ) -> tuple[list[Any], str, datetime, bool, bool, list[str]]:
+        """Positional fields of a TleResult/OmmResult: (items, source, retrieved_at,
+        from_cache, stale, warnings). A download is parsed before it is cached, so a
+        corrupt response never replaces a good cached copy."""
         path = self.cache_dir / cache_name
         if path.exists():
             age = self.clock() - datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
             if age < self.ttl:
-                return self._read_cache(path, stale=False)
+                return self._read_cache(path, parse, stale=False)
         try:
             resp = self.session.get(
                 GP_URL,
-                params={**params, "FORMAT": "TLE"},
+                params={**params, "FORMAT": fmt},
                 timeout=self.timeout_s,
                 headers={"User-Agent": USER_AGENT},
             )
@@ -120,12 +149,11 @@ class CelesTrakClient:
             text = resp.text
             if re.search(r"No GP data found", text, re.IGNORECASE):
                 raise CelesTrakError(f"CelesTrak: no GP data found for {params}.")
-            tles = parse_tle_text(text)
-        except (requests.RequestException, CelesTrakError) as exc:
+            items = parse(text)
+        except (requests.RequestException, ValueError, CelesTrakError) as exc:
             if path.exists():
-                return self._read_cache(
-                    path, stale=True, warning=f"Refresh failed ({exc}); using stale cached copy."
-                )
+                warning = f"Refresh failed ({exc}); using stale cached copy."
+                return self._read_cache(path, parse, stale=True, warning=warning)
             raise CelesTrakError(f"Could not fetch {params} from CelesTrak: {exc}") from exc
 
         now = self.clock()
@@ -135,15 +163,28 @@ class CelesTrakClient:
         # The file's mtime *is* the download time; stamp it from our clock so cache age is
         # always measured on one clock (matters when a test injects a fake clock).
         os.utime(path, (now.timestamp(), now.timestamp()))
-        return TleResult(tles=tles, source="CelesTrak GP API", retrieved_at=now, from_cache=False)
+        return items, "CelesTrak GP API", now, False, False, []
+
+    @staticmethod
+    def _read_cache(path: Path, parse: Callable[[str], list[Any]], stale: bool, warning=None):
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+        items = parse(path.read_text(encoding="utf-8"))
+        return items, "CelesTrak GP API (cached)", mtime, True, stale, [warning] if warning else []
 
 
 class FileTleSource:
-    """Offline TLE source that reads a saved TLE file (used for tests, evals, demos)."""
+    """Offline element-set source that reads saved files (used for tests, evals, demos).
 
-    def __init__(self, path: Path, retrieved_at: datetime) -> None:
+    ``omm_files`` maps OMM group names to fixtures recorded by
+    ``scripts/record_fixtures.py starlink`` (gzipped JSON with the recording metadata).
+    """
+
+    def __init__(
+        self, path: Path, retrieved_at: datetime, omm_files: dict[str, Path] | None = None
+    ) -> None:
         self.path = Path(path)
         self.retrieved_at = retrieved_at
+        self.omm_files = {k: Path(v) for k, v in (omm_files or {}).items()}
 
     def _all(self) -> list[Tle]:
         return parse_tle_text(self.path.read_text(encoding="utf-8"))
@@ -156,3 +197,25 @@ class FileTleSource:
 
     def get_group(self, group: str) -> TleResult:
         return TleResult(self._all(), f"fixture file {self.path.name}", self.retrieved_at, True)
+
+    def get_omm_group(self, group: str) -> OmmResult:
+        path = self.omm_files.get(group.lower())
+        if path is None:
+            raise CelesTrakError(f"No recorded OMM fixture for group {group!r}.")
+        recorded = load_omm_fixture(path)
+        stamp = recorded["orbitwatch:recorded"]["recorded_at_utc"]
+        return OmmResult(
+            records=parse_omm_json(json.dumps(recorded["records"])),
+            source=f"fixture file {path.name}",
+            retrieved_at=datetime.fromisoformat(stamp.replace("Z", "+00:00")),
+            from_cache=True,
+        )
+
+
+def load_omm_fixture(path: Path) -> dict[str, Any]:
+    """Read a recorded OMM fixture: ``{"orbitwatch:recorded": {...}, "records": [...]}``."""
+    path = Path(path)
+    raw = path.read_bytes()
+    if path.suffix == ".gz":
+        raw = gzip.decompress(raw)
+    return json.loads(raw.decode("utf-8"))

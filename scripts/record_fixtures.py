@@ -3,6 +3,8 @@
     python scripts/record_fixtures.py stac        # Earth Search items for the demo AOI
     python scripts/record_fixtures.py tle         # CelesTrak 'stations' group (mind the rate limit)
     python scripts/record_fixtures.py ephemeris   # 2-month excerpt of JPL DE421 (~25 KB)
+    python scripts/record_fixtures.py starlink    # CelesTrak 'starlink' group as OMM JSON (gzip)
+    python scripts/record_fixtures.py starlink --from-file saved.json --recorded-at 2026-...Z
 
 Fixtures are real recorded metadata. STAC items are trimmed to the assets orbitwatch
 reads (no pixels are stored). Run sparingly: CelesTrak allows one download per 2-hour
@@ -11,6 +13,7 @@ update cycle.
 
 from __future__ import annotations
 
+import gzip
 import json
 import subprocess
 import sys
@@ -76,6 +79,46 @@ def record_tle() -> None:
     print(f"wrote {path} at {datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ}")
 
 
+def record_starlink() -> None:
+    """Download the Starlink group once as OMM JSON and store it gzipped, unmodified.
+
+    ``--from-file PATH --recorded-at STAMP`` wraps a response that was already downloaded
+    (so the fixture can be made without a second request inside the same 2-hour cycle).
+    """
+    args = sys.argv[2:]
+    if "--from-file" in args:
+        text = Path(args[args.index("--from-file") + 1]).read_text(encoding="utf-8")
+        stamp = args[args.index("--recorded-at") + 1]
+    else:
+        import requests
+
+        from orbitwatch.orbits.celestrak import GP_URL, USER_AGENT
+
+        resp = requests.get(
+            GP_URL,
+            params={"GROUP": "starlink", "FORMAT": "JSON"},
+            timeout=60,
+            headers={"User-Agent": USER_AGENT},
+        )
+        resp.raise_for_status()
+        text, stamp = resp.text, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    records = json.loads(text)
+    out = {
+        "orbitwatch:recorded": {
+            "source": "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=JSON",
+            "recorded_at_utc": stamp,
+            "record_count": len(records),
+            "note": "Real CelesTrak GP data (OMM), records unmodified; only re-serialised "
+            "compactly and gzipped.",
+        },
+        "records": records,
+    }
+    path = FIXTURES / f"starlink_{stamp[:10]}.json.gz"
+    blob = json.dumps(out, separators=(",", ":")).encode("utf-8")
+    path.write_bytes(gzip.compress(blob, mtime=0))  # mtime=0: byte-stable output
+    print(f"wrote {len(records)} records to {path} ({path.stat().st_size} bytes)")
+
+
 def record_ephemeris() -> None:
     from skyfield.api import Loader
 
@@ -101,4 +144,9 @@ def record_ephemeris() -> None:
 
 
 if __name__ == "__main__":
-    {"stac": record_stac, "tle": record_tle, "ephemeris": record_ephemeris}[sys.argv[1]]()
+    {
+        "stac": record_stac,
+        "tle": record_tle,
+        "ephemeris": record_ephemeris,
+        "starlink": record_starlink,
+    }[sys.argv[1]]()

@@ -25,8 +25,9 @@ from orbitwatch.tools import TOOL_NAMES, Toolbox
 INSTRUCTIONS = (
     "Tools for orbital and Earth-observation analysis around Lompoc / Vandenberg SFB, "
     "California. Use predict_passes for satellite pass times, search_sentinel2_scenes then "
-    "compare_index_between_scenes for vegetation (NDVI) or burn (NBR) change. Quote numbers, "
-    "scene IDs, dates and TLE epochs exactly as the tools return them."
+    "compare_index_between_scenes for vegetation (NDVI) or burn (NBR) change, "
+    "starlink_visible_passes and find_starlink_trains for Starlink. Quote numbers, scene IDs, "
+    "dates and element-set epochs exactly as the tools return them."
 )
 
 

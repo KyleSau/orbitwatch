@@ -78,6 +78,19 @@ def check_case(case: dict, result: AgentResult) -> list[str]:
         epochs = [o["tle_epoch_utc"] for o in outputs if "tle_epoch_utc" in o]
         if not epochs or not any(e[:10] in answer and e[11:16] in answer for e in epochs):
             failures.append(f"TLE epoch {epochs} not cited in the answer")
+    if "cites_element_epochs" in checks:
+        # Starlink: every satellite quoted must come with its own element-set epoch.
+        epochs = [
+            p["elements_epoch_utc"]
+            for o in outputs
+            for p in o.get("passes", [])
+            if "elements_epoch_utc" in p
+        ]
+        if not epochs:
+            failures.append("no Starlink passes with element epochs to cite")
+        missing = [e for e in epochs if e not in answer]
+        if missing:
+            failures.append(f"element epochs not cited: {missing}")
     if "cites_scenes" in checks:
         compares = [o for o in outputs if "before_scene" in o]
         if not compares:
