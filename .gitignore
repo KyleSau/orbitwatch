@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# orbitwatch runtime data (TLE cache, JPL ephemeris, generated rasters/PNGs)
+.cache/
+orbitwatch_output/
+evals/results/
+
+# Large rasters never belong in the repo (only fixtures/ metadata and docs/ PNG do)
+*.tif
+*.tiff
+*.jp2
+*.bsp
+!orbitwatch/fixtures/*.bsp
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

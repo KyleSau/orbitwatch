@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orbitwatch"
+version = "0.1.0"
+description = "An AI analyst for orbital and Earth-observation data: satellite pass predictions, Sentinel-2 change analysis, an MCP server and a Claude tool-use agent."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Kyle Saunders" }]
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=1.13",
+    "matplotlib>=3.8",
+    "mcp>=2.3",
+    "numpy>=1.26",
+    "pydantic>=2.6",
+    "pystac-client>=0.8",
+    "pyyaml>=6.0",
+    "rasterio>=1.4",
+    "requests>=2.31",
+    "skyfield>=1.49",
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+orbitwatch = "orbitwatch.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["orbitwatch*"]
+
+[tool.setuptools.package-data]
+orbitwatch = ["fixtures/*.tle", "fixtures/*.json", "fixtures/*.bsp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: hits real network services (CelesTrak, Earth Search, Anthropic); skipped unless --live"]
+# Raised inside Skyfield's search code on NumPy >= 2.5; not ours to fix.
+filterwarnings = ["ignore:Setting the dtype on a NumPy array:DeprecationWarning"]
