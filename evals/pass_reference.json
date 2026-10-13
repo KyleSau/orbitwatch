@@ -1,0 +1,125 @@
+{
+ "method": "brute-force 1 s elevation scan with linear threshold interpolation and parabolic peak refinement (evals/make_pass_reference.py)",
+ "tle": [
+  "ISS (ZARYA)",
+  "1 25544U 98067A   26286.11204827  .00005858  00000+0  11499-3 0  9991",
+  "2 25544  51.6319  76.5194 0006724 256.4602 103.5638 15.48846742590035"
+ ],
+ "site": {
+  "name": "lompoc",
+  "latitude": 34.64611,
+  "longitude": -120.46028,
+  "elevation_m": 32.0,
+  "timezone": "America/Los_Angeles",
+  "source": "Wikipedia 'Lompoc, California' infobox: 34\u00b038'46\"N 120\u00b027'37\"W, 32 m"
+ },
+ "window_start_utc": "2026-10-13T20:00:00+00:00",
+ "days": 3,
+ "min_elevation_deg": 10.0,
+ "passes": [
+  {
+   "rise_utc": "2026-10-13T20:12:40.191324+00:00",
+   "culmination_utc": "2026-10-13T20:15:31.857010+00:00",
+   "set_utc": "2026-10-13T20:18:22.494207+00:00",
+   "max_elevation_deg": 24.4714,
+   "rise_azimuth_deg": 336.824,
+   "set_azimuth_deg": 91.485
+  },
+  {
+   "rise_utc": "2026-10-13T21:49:21.516545+00:00",
+   "culmination_utc": "2026-10-13T21:52:19.947778+00:00",
+   "set_utc": "2026-10-13T21:55:17.081638+00:00",
+   "max_elevation_deg": 28.529,
+   "rise_azimuth_deg": 290.676,
+   "set_azimuth_deg": 167.727
+  },
+  {
+   "rise_utc": "2026-10-14T12:53:11.715587+00:00",
+   "culmination_utc": "2026-10-14T12:56:27.446130+00:00",
+   "set_utc": "2026-10-14T12:59:44.685462+00:00",
+   "max_elevation_deg": 47.8007,
+   "rise_azimuth_deg": 208.686,
+   "set_azimuth_deg": 58.28
+  },
+  {
+   "rise_utc": "2026-10-14T14:31:03.361849+00:00",
+   "culmination_utc": "2026-10-14T14:33:27.683577+00:00",
+   "set_utc": "2026-10-14T14:35:52.569886+00:00",
+   "max_elevation_deg": 17.815,
+   "rise_azimuth_deg": 283.942,
+   "set_azimuth_deg": 14.509
+  },
+  {
+   "rise_utc": "2026-10-14T19:25:47.524374+00:00",
+   "culmination_utc": "2026-10-14T19:28:03.372082+00:00",
+   "set_utc": "2026-10-14T19:30:18.677518+00:00",
+   "max_elevation_deg": 16.4676,
+   "rise_azimuth_deg": 348.001,
+   "set_azimuth_deg": 71.697
+  },
+  {
+   "rise_utc": "2026-10-14T21:01:47.058750+00:00",
+   "culmination_utc": "2026-10-14T21:05:06.784726+00:00",
+   "set_utc": "2026-10-14T21:08:24.825254+00:00",
+   "max_elevation_deg": 55.1476,
+   "rise_azimuth_deg": 304.275,
+   "set_azimuth_deg": 147.334
+  },
+  {
+   "rise_utc": "2026-10-15T12:06:24.091215+00:00",
+   "culmination_utc": "2026-10-15T12:09:14.506483+00:00",
+   "set_utc": "2026-10-15T12:12:06.017645+00:00",
+   "max_elevation_deg": 25.246,
+   "rise_azimuth_deg": 187.701,
+   "set_azimuth_deg": 72.557
+  },
+  {
+   "rise_utc": "2026-10-15T13:43:02.976401+00:00",
+   "culmination_utc": "2026-10-15T13:45:59.461881+00:00",
+   "set_utc": "2026-10-15T13:48:56.968785+00:00",
+   "max_elevation_deg": 26.8448,
+   "rise_azimuth_deg": 264.593,
+   "set_azimuth_deg": 25.356
+  },
+  {
+   "rise_utc": "2026-10-15T18:39:14.293268+00:00",
+   "culmination_utc": "2026-10-15T18:40:30.333406+00:00",
+   "set_utc": "2026-10-15T18:41:46.236003+00:00",
+   "max_elevation_deg": 11.5873,
+   "rise_azimuth_deg": 3.328,
+   "set_azimuth_deg": 47.279
+  },
+  {
+   "rise_utc": "2026-10-15T20:14:25.494220+00:00",
+   "culmination_utc": "2026-10-15T20:17:49.328385+00:00",
+   "set_utc": "2026-10-15T20:21:11.468937+00:00",
+   "max_elevation_deg": 76.0028,
+   "rise_azimuth_deg": 315.704,
+   "set_azimuth_deg": 128.7
+  },
+  {
+   "rise_utc": "2026-10-16T11:20:13.440930+00:00",
+   "culmination_utc": "2026-10-16T11:22:04.146118+00:00",
+   "set_utc": "2026-10-16T11:23:55.259579+00:00",
+   "max_elevation_deg": 14.0022,
+   "rise_azimuth_deg": 160.335,
+   "set_azimuth_deg": 93.574
+  },
+  {
+   "rise_utc": "2026-10-16T12:55:18.936283+00:00",
+   "culmination_utc": "2026-10-16T12:58:34.477430+00:00",
+   "set_utc": "2026-10-16T13:01:51.470067+00:00",
+   "max_elevation_deg": 44.8523,
+   "rise_azimuth_deg": 246.337,
+   "set_azimuth_deg": 35.583
+  },
+  {
+   "rise_utc": "2026-10-16T19:27:12.856142+00:00",
+   "culmination_utc": "2026-10-16T19:30:27.388991+00:00",
+   "set_utc": "2026-10-16T19:33:40.523570+00:00",
+   "max_elevation_deg": 40.7142,
+   "rise_azimuth_deg": 326.146,
+   "set_azimuth_deg": 110.612
+  }
+ ]
+}

@@ -1,0 +1,77 @@
+# Golden questions for orbitwatch, with checkable expectations.
+#
+# Offline (CI):  python -m evals.run_evals            -> scripted planner + recorded fixtures
+# Live Claude:   python -m evals.run_evals --live     -> Claude agent (needs ANTHROPIC_API_KEY)
+#
+# expect_tools:  every listed tool must be called at least once
+# forbid_tools:  none of these may be called
+# expect_args:   at least one call of that tool must match these arguments
+#                (omitted arguments are filled with the tool's defaults before comparing)
+# checks:
+#   grounded         every number, date and time in the answer appears in a tool result
+#   cites_tle_epoch  the answer states the TLE epoch (date and HH:MM) it used
+#   cites_scenes     the answer names the scene IDs and acquisition dates it compared
+
+cases:
+  - id: iss_visible_lompoc
+    question: "When are the next visible ISS passes over Lompoc?"
+    expect_tools: [predict_passes]
+    expect_args:
+      predict_passes: {norad_id: 25544, site: lompoc, visible_only: true}
+    checks: [grounded, cites_tle_epoch]
+
+  - id: iss_vandenberg_high_passes
+    question: "List all ISS passes over Vandenberg in the next 2 days above 20 degrees."
+    expect_tools: [predict_passes]
+    expect_args:
+      predict_passes: {norad_id: 25544, site: vandenberg, days: 2, min_elevation_deg: 20}
+    checks: [grounded, cites_tle_epoch]
+
+  - id: tiangong_visible_week
+    question: "Is Tiangong visible from Lompoc this week?"
+    expect_tools: [predict_passes]
+    expect_args:
+      predict_passes: {norad_id: 48274, site: lompoc, visible_only: true}
+    checks: [grounded, cites_tle_epoch]
+
+  - id: iss_tle
+    question: "Show me the current TLE for the ISS."
+    expect_tools: [get_tle]
+    expect_args:
+      get_tle: {norad_id: 25544}
+    checks: [grounded]
+
+  - id: ndvi_change_lompoc_valley
+    question: "How did vegetation (NDVI) change over the Lompoc Valley fields between April 2026 and September 2026?"
+    expect_tools: [search_sentinel2_scenes, compare_index_between_scenes]
+    expect_args:
+      compare_index_between_scenes: {index: ndvi}
+    checks: [grounded, cites_scenes]
+
+  - id: nbr_change_bbox
+    question: "Compute burn severity (NBR) change over [-120.53, 34.635, -120.49, 34.665] between 2026-04-01 and 2026-04-30 and between 2026-09-01 and 2026-09-30."
+    expect_tools: [search_sentinel2_scenes, compare_index_between_scenes]
+    expect_args:
+      compare_index_between_scenes: {index: nbr, bbox: [-120.53, 34.635, -120.49, 34.665]}
+    checks: [grounded, cites_scenes]
+
+  - id: scene_search_low_cloud
+    question: "Which Sentinel-2 scenes with less than 5% cloud cover cover the Lompoc Valley in September 2026?"
+    expect_tools: [search_sentinel2_scenes]
+    expect_args:
+      search_sentinel2_scenes: {max_cloud_cover: 5, start_date: "2026-09-01", end_date: "2026-09-30"}
+    checks: [grounded]
+
+  - id: out_of_scope_weather
+    question: "What will the weather be in Lompoc tomorrow?"
+    forbid_tools: [predict_passes, get_tle, search_sentinel2_scenes, compare_index_between_scenes]
+    checks: [grounded]
+
+# Tool-level physics check, always run on fixtures: our event-based pass finder must
+# agree with an independent brute-force 1-second scan (evals/make_pass_reference.py).
+reference_cases:
+  - id: iss_pass_geometry_matches_bruteforce
+    tool: predict_passes
+    args: {norad_id: 25544, site: lompoc, days: 3, min_elevation_deg: 10}
+    reference: pass_reference.json
+    tolerance: {time_s: 2.0, elevation_deg: 0.05, azimuth_deg: 0.2}
